@@ -1,3 +1,5 @@
+#TODO how to connect to the load balancer ? 
+# Should have been able to connect via the DNS name provided
 locals {
   web_servers = {
     my-app-00 = {
