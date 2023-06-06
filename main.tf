@@ -1,6 +1,19 @@
+locals {
+  web_servers = {
+    my-app-00 = {
+      machine_type = "t2.micro"
+      subnet_id    = aws_subnet.private_eu_west_1a.id
+    }
+    my-app-01 = {
+      machine_type = "t2.micro"
+      subnet_id    = aws_subnet.private_eu_west_1b.id
+    }
+  }
+}
+
 # Create a VPC
 resource "aws_vpc" "app_vpc" {
-  cidr_block = var.vpc_cidr
+  cidr_block = "10.0.0.0/16"
 
   tags = {
     Name = "app-vpc"
@@ -12,17 +25,6 @@ resource "aws_internet_gateway" "igw" {
 
   tags = {
     Name = "vpc_igw"
-  }
-}
-
-resource "aws_subnet" "public_subnet" {
-  vpc_id            = aws_vpc.app_vpc.id
-  cidr_block        = var.public_subnet_cidr
-  map_public_ip_on_launch = true
-  availability_zone = "eu-west-1a"
-
-  tags = {
-    Name = "public-subnet"
   }
 }
 
@@ -40,45 +42,45 @@ resource "aws_route_table" "public_rt" {
 }
 
 resource "aws_route_table_association" "public_rt_asso" {
-  subnet_id      = aws_subnet.public_subnet.id
+  subnet_id      = aws_subnet.public_eu_west_1a.id
   route_table_id = aws_route_table.public_rt.id
 
 }
 
-resource "aws_instance" "web" {
-ami             = "ami-0f29c8402f8cce65c" 
-instance_type   = var.instance_type
-key_name        = var.instance_key
-subnet_id       = aws_subnet.public_subnet.id
-security_groups = [aws_security_group.sg.id]
+resource "aws_instance" "my_app_eg1" {
+  for_each = local.web_servers
 
-user_data = <<-EOF
-#!/bin/bash
-echo "*** Installing apache2"
-sudo apt update -y
-sudo apt install apache2 -y
-echo "*** Completed Installing apache2"
-EOF
+  ami           = "ami-08542e8d46d02e096"
+  instance_type = each.value.machine_type
+  key_name      = "my-key-pair"
+  subnet_id     = each.value.subnet_id
 
-tags = {
-  Name = "web_instance"
+  vpc_security_group_ids = [aws_security_group.sg.id]
+
+  user_data = <<-EOF
+  #!/bin/bash
+  echo "*** Installing apache2"
+  sudo apt update -y
+  sudo apt install apache2 -y
+  echo "*** Completed Installing apache2"
+  EOF
+
+
+  tags = {
+    Name = each.key
+  }
 }
 
-volume_tags = {
-  Name = "web_instance"
- } 
-}
-
-resource "aws_ami_from_instance" "example" {
-  name               = "web_server_instance"
-  source_instance_id = aws_instance.web.id
-  count = 3
-}
+# resource "aws_ami_from_instance" "example" {
+#   name               = "web_server_instance"
+#   source_instance_id = aws_instance.web.id
+#   count = 3
+# }
 resource "aws_lb_target_group" "my_app_eg1" {
   name       = "my-app-eg1"
   port       = 8080
   protocol   = "HTTP"
-  vpc_id     = aws_vpc.main.id
+  vpc_id     = aws_vpc.app_vpc.id
   slow_start = 0
 
   load_balancing_algorithm_type = "round_robin"
@@ -112,7 +114,7 @@ resource "aws_lb" "my_app_eg1" {
   name               = "my-app-eg1"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb_eg1.id]
+  security_groups    = [aws_security_group.sg.id]
 
   # access_logs {
   #   bucket  = "my-logs"
@@ -121,8 +123,8 @@ resource "aws_lb" "my_app_eg1" {
   # }
 
   subnets = [
-    aws_subnet.public_us_east_1a.id,
-    aws_subnet.public_us_east_1b.id
+    aws_subnet.public_eu_west_1a.id,
+    aws_subnet.public_eu_west_1b.id
   ]
 }
 
