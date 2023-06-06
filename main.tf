@@ -45,9 +45,8 @@ resource "aws_route_table_association" "public_rt_asso" {
 
 }
 
-
 resource "aws_instance" "web" {
-ami             = "ami-005e54dee72cc1d00" 
+ami             = "ami-0f29c8402f8cce65c" 
 instance_type   = var.instance_type
 key_name        = var.instance_key
 subnet_id       = aws_subnet.public_subnet.id
@@ -67,5 +66,23 @@ tags = {
 
 volume_tags = {
   Name = "web_instance"
-} 
+ } 
 }
+
+  # Inny sposób na egzekucje komand na nowo stworzonej maszynce
+  # provisioner "remote-exec" {
+  #   inline = [
+  #     "sed -i \"s/MAGE_COMPOSER_USERNAME/${var.mage_composer_username}/g\" /tmp/ec2_install/configs/auth.json",
+  #     "sed -i \"s/MAGE_COMPOSER_PASSWORD/${var.mage_composer_password}/g\" /tmp/ec2_install/configs/auth.json",
+  #     "chmod +x /tmp/ec2_install/scripts/*.sh",
+  #     "/tmp/ec2_install/scripts/install_stack.sh",
+  #   ]
+
+  #   connection {
+  #     type        = "ssh"
+  #     host        = self.public_ip
+  #     user        = var.ssh_username
+  #     private_key = data.aws_secretsmanager_secret_version.ssh-key.secret_string
+  #   }
+
+  # }
