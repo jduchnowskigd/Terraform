@@ -1,5 +1,3 @@
-#TODO how to connect to the load balancer ? 
-# Should have been able to connect via the DNS name provided
 locals {
   web_servers = {
     my-app-00 = {
@@ -13,52 +11,80 @@ locals {
   }
 }
 
-# Create a VPC
-resource "aws_vpc" "app_vpc" {
-  cidr_block = "10.0.0.0/16"
 
-  tags = {
-    Name = "app-vpc"
-  }
+resource "aws_security_group" "ec2_eg1" {
+  name   = "ec2-eg1"
+  vpc_id = aws_vpc.main.id
 }
 
-resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.app_vpc.id
-
-  tags = {
-    Name = "vpc_igw"
-  }
+resource "aws_security_group" "alb_eg1" {
+  name   = "alb-eg1"
+  vpc_id = aws_vpc.main.id
 }
 
-resource "aws_route_table" "public_rt" {
-  vpc_id = aws_vpc.app_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw.id
-  }
-
-  tags = {
-    Name = "public_rt"
-  }
+resource "aws_security_group_rule" "ingress_ec2_traffic" {
+  type                     = "ingress"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ec2_eg1.id
+  source_security_group_id = aws_security_group.alb_eg1.id
 }
 
-resource "aws_route_table_association" "public_rt_asso" {
-  subnet_id      = aws_subnet.public_eu_west_1a.id
-  route_table_id = aws_route_table.public_rt.id
+resource "aws_security_group_rule" "ingress_ec2_health_check" {
+  type                     = "ingress"
+  from_port                = 8081
+  to_port                  = 8081
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ec2_eg1.id
+  source_security_group_id = aws_security_group.alb_eg1.id
+}
 
+# resource "aws_security_group_rule" "full_egress_ec2" {
+#   type              = "egress"
+#   from_port         = 0
+#   to_port           = 0
+#   protocol          = "-1"
+#   security_group_id = aws_security_group.ec2_eg1.id
+#   cidr_blocks       = ["0.0.0.0/0"]
+# }
+
+resource "aws_security_group_rule" "ingress_alb_traffic" {
+  type              = "ingress"
+  from_port         = 80
+  to_port           = 80
+  protocol          = "tcp"
+  security_group_id = aws_security_group.alb_eg1.id
+  cidr_blocks       = ["0.0.0.0/0"]
+}
+
+resource "aws_security_group_rule" "egress_alb_traffic" {
+  type                     = "egress"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.alb_eg1.id
+  source_security_group_id = aws_security_group.ec2_eg1.id
+}
+
+resource "aws_security_group_rule" "egress_alb_health_check" {
+  type                     = "egress"
+  from_port                = 8081
+  to_port                  = 8081
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.alb_eg1.id
+  source_security_group_id = aws_security_group.ec2_eg1.id
 }
 
 resource "aws_instance" "my_app_eg1" {
   for_each = local.web_servers
 
-  ami           = "ami-08542e8d46d02e096"
+  ami           = "ami-0f29c8402f8cce65c"
   instance_type = each.value.machine_type
-  key_name      = "my-key-pair"
+  key_name      = "linuxbasics"
   subnet_id     = each.value.subnet_id
 
-  vpc_security_group_ids = [aws_security_group.sg.id]
-
+  vpc_security_group_ids = [aws_security_group.ec2_eg1.id]
   user_data = <<-EOF
   #!/bin/bash
   echo "*** Installing apache2"
@@ -66,23 +92,18 @@ resource "aws_instance" "my_app_eg1" {
   sudo apt install apache2 -y
   echo "*** Completed Installing apache2"
   EOF
-
-
   tags = {
-    Name = each.key
+    Name = "ec2"
+    Owner = "jduchnowski" 
+    Project = "2023_internship_gda"
   }
 }
 
-# resource "aws_ami_from_instance" "example" {
-#   name               = "web_server_instance"
-#   source_instance_id = aws_instance.web.id
-#   count = 3
-# }
 resource "aws_lb_target_group" "my_app_eg1" {
   name       = "my-app-eg1"
   port       = 8080
   protocol   = "HTTP"
-  vpc_id     = aws_vpc.app_vpc.id
+  vpc_id     = aws_vpc.main.id
   slow_start = 0
 
   load_balancing_algorithm_type = "round_robin"
@@ -116,7 +137,7 @@ resource "aws_lb" "my_app_eg1" {
   name               = "my-app-eg1"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.sg.id]
+  security_groups    = [aws_security_group.alb_eg1.id]
 
   # access_logs {
   #   bucket  = "my-logs"
@@ -140,21 +161,3 @@ resource "aws_lb_listener" "http_eg1" {
     target_group_arn = aws_lb_target_group.my_app_eg1.arn
   }
 }
-
-  # Inny sposób na egzekucje komand na nowo stworzonej maszynce
-  # provisioner "remote-exec" {
-  #   inline = [
-  #     "sed -i \"s/MAGE_COMPOSER_USERNAME/${var.mage_composer_username}/g\" /tmp/ec2_install/configs/auth.json",
-  #     "sed -i \"s/MAGE_COMPOSER_PASSWORD/${var.mage_composer_password}/g\" /tmp/ec2_install/configs/auth.json",
-  #     "chmod +x /tmp/ec2_install/scripts/*.sh",
-  #     "/tmp/ec2_install/scripts/install_stack.sh",
-  #   ]
-
-  #   connection {
-  #     type        = "ssh"
-  #     host        = self.public_ip
-  #     user        = var.ssh_username
-  #     private_key = data.aws_secretsmanager_secret_version.ssh-key.secret_string
-  #   }
-
-  # }
