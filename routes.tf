@@ -1,18 +1,11 @@
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.nat.id
-  }
-
-  tags = {
-    Name = "private"
-  }
+resource "aws_route" "internet_connection" {
+  route_table_id = aws_vpc.app_vpc.default_route_table_id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id = aws_internet_gateway.igw.id
 }
 
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
+resource "aws_route_table" "public_rt" {
+  vpc_id = aws_vpc.app_vpc.id
 
   route {
     cidr_block = "0.0.0.0/0"
@@ -20,26 +13,28 @@ resource "aws_route_table" "public" {
   }
 
   tags = {
-    Name = "public"
+    Name = "route_table"
+    Owner = "jduchnowski" 
+    Project = "2023_internship_gda"
   }
 }
 
-resource "aws_route_table_association" "private_eu_west_1a" {
-  subnet_id      = aws_subnet.private_eu_west_1a.id
-  route_table_id = aws_route_table.private.id
-}
-
-resource "aws_route_table_association" "private_eu_west_1b" {
-  subnet_id      = aws_subnet.private_eu_west_1b.id
-  route_table_id = aws_route_table.private.id
-}
-
-resource "aws_route_table_association" "public_eu_west_1a" {
+resource "aws_route_table_association" "public_rt_asso_a" {
   subnet_id      = aws_subnet.public_eu_west_1a.id
-  route_table_id = aws_route_table.public.id
+  route_table_id = aws_route_table.public_rt.id
+
 }
 
-resource "aws_route_table_association" "public_eu_west_1b" {
+resource "aws_route_table_association" "public_rt_asso_b" {
   subnet_id      = aws_subnet.public_eu_west_1b.id
-  route_table_id = aws_route_table.public.id
+  route_table_id = aws_route_table.public_rt.id
+
 }
+
+# resource "aws_route_table_association" "public_rt_asso_igw" {
+#   gateway_id      = aws_internet_gateway.igw.id
+#   route_table_id = aws_route_table.public_rt.id
+
+# }
+
+#Czemu nie odpala się to route table na wejściu

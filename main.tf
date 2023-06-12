@@ -1,163 +1,114 @@
-locals {
-  web_servers = {
-    my-app-00 = {
-      machine_type = "t2.micro"
-      subnet_id    = aws_subnet.private_eu_west_1a.id
-    }
-    my-app-01 = {
-      machine_type = "t2.micro"
-      subnet_id    = aws_subnet.private_eu_west_1b.id
+provider "aws" {
+  region = "eu-west-1"
+
+  default_tags {
+    tags = {
+      hashicorp-learn = "aws-asg"
     }
   }
 }
 
+terraform {
 
-resource "aws_security_group" "ec2_eg1" {
-  name   = "ec2-eg1"
-  vpc_id = aws_vpc.main.id
+  backend "s3" {
+      depends_on = [aws_s3_bucket.terraform_state]
+    # bucket = aws_s3_bucket.terraform_state.name
+    # key    = "terraform.tfstate"
+    # region = "eu-west-1"  
+  }
 }
 
-resource "aws_security_group" "alb_eg1" {
-  name   = "alb-eg1"
-  vpc_id = aws_vpc.main.id
-}
-
-resource "aws_security_group_rule" "ingress_ec2_traffic" {
-  type                     = "ingress"
-  from_port                = 8080
-  to_port                  = 8080
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.ec2_eg1.id
-  source_security_group_id = aws_security_group.alb_eg1.id
-}
-
-resource "aws_security_group_rule" "ingress_ec2_health_check" {
-  type                     = "ingress"
-  from_port                = 8081
-  to_port                  = 8081
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.ec2_eg1.id
-  source_security_group_id = aws_security_group.alb_eg1.id
-}
-
-# resource "aws_security_group_rule" "full_egress_ec2" {
-#   type              = "egress"
-#   from_port         = 0
-#   to_port           = 0
-#   protocol          = "-1"
-#   security_group_id = aws_security_group.ec2_eg1.id
-#   cidr_blocks       = ["0.0.0.0/0"]
-# }
-
-resource "aws_security_group_rule" "ingress_alb_traffic" {
-  type              = "ingress"
-  from_port         = 80
-  to_port           = 80
-  protocol          = "tcp"
-  security_group_id = aws_security_group.alb_eg1.id
-  cidr_blocks       = ["0.0.0.0/0"]
-}
-
-resource "aws_security_group_rule" "egress_alb_traffic" {
-  type                     = "egress"
-  from_port                = 8080
-  to_port                  = 8080
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.alb_eg1.id
-  source_security_group_id = aws_security_group.ec2_eg1.id
-}
-
-resource "aws_security_group_rule" "egress_alb_health_check" {
-  type                     = "egress"
-  from_port                = 8081
-  to_port                  = 8081
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.alb_eg1.id
-  source_security_group_id = aws_security_group.ec2_eg1.id
-}
-
-resource "aws_instance" "my_app_eg1" {
-  for_each = local.web_servers
-
-  ami           = "ami-0f29c8402f8cce65c"
-  instance_type = each.value.machine_type
-  key_name      = "linuxbasics"
-  subnet_id     = each.value.subnet_id
-
-  vpc_security_group_ids = [aws_security_group.ec2_eg1.id]
-  user_data = <<-EOF
-  #!/bin/bash
-  echo "*** Installing apache2"
-  sudo apt update -y
-  sudo apt install apache2 -y
-  echo "*** Completed Installing apache2"
-  EOF
-  tags = {
+resource "aws_instance" "template_ec2" {
+    ami = "ami-0f29c8402f8cce65c"
+    instance_type = "t2.micro"
+    key_name = "linuxbasics"
+    security_groups = [ aws_security_group.sg.id ]
+    associate_public_ip_address = true
+    subnet_id = aws_subnet.public_eu_west_1a.id
+    user_data = <<-EOF
+    #!/bin/bash
+    echo "*** Installing apache2"
+    sudo apt update -y
+    sudo apt install apache2 -y
+    echo "*** Completed Installing apache2"
+    echo "<html><body><h1>Instance Hostname: $(hostname)</h1></body></html>" > /var/www/html/index.html
+    EOF
+      tags = {
     Name = "ec2"
     Owner = "jduchnowski" 
     Project = "2023_internship_gda"
   }
 }
 
-resource "aws_lb_target_group" "my_app_eg1" {
-  name       = "my-app-eg1"
-  port       = 8080
-  protocol   = "HTTP"
-  vpc_id     = aws_vpc.main.id
-  slow_start = 0
+resource "aws_ami_from_instance" "template_ami" {
+    depends_on = [ aws_instance.template_ec2 ]
+    name = "template_ami2"
+    source_instance_id = aws_instance.template_ec2.id
 
-  load_balancing_algorithm_type = "round_robin"
-
-  stickiness {
-    enabled = false
-    type    = "lb_cookie"
-  }
-
-  health_check {
-    enabled             = true
-    port                = 8081
-    interval            = 30
-    protocol            = "HTTP"
-    path                = "/health"
-    matcher             = "200"
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
+  tags = {
+    Name = "template_ami"
+    Owner = "jduchnowski" 
+    Project = "2023_internship_gda"
   }
 }
 
-resource "aws_lb_target_group_attachment" "my_app_eg1" {
-  for_each = aws_instance.my_app_eg1
 
-  target_group_arn = aws_lb_target_group.my_app_eg1.arn
-  target_id        = each.value.id
-  port             = 8080
+resource "aws_launch_configuration" "terramino" {
+  name_prefix     = "learn-terraform-aws-asg-"
+  image_id        = aws_ami_from_instance.template_ami.id
+  instance_type   = aws_instance.template_ec2.instance_type
+  user_data = aws_instance.template_ec2.user_data
+  security_groups = [ aws_security_group.sg.id ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
-resource "aws_lb" "my_app_eg1" {
-  name               = "my-app-eg1"
+resource "aws_autoscaling_group" "terramino" {
+  name                 = "terramino"
+  min_size             = 1
+  max_size             = 3
+  desired_capacity     = 3
+  launch_configuration = aws_launch_configuration.terramino.name
+  vpc_zone_identifier = [aws_subnet.public_eu_west_1a.id, aws_subnet.public_eu_west_1b.id]
+
+  tag {
+    key                 = "Name"
+    value               = "HashiCorp Learn ASG - Terramino"
+    propagate_at_launch = true
+  }
+}
+
+resource "aws_lb" "terramino" {
+  name               = "learn-asg-terramino-lb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb_eg1.id]
-
-  # access_logs {
-  #   bucket  = "my-logs"
-  #   prefix  = "my-app-lb"
-  #   enabled = true
-  # }
-
-  subnets = [
-    aws_subnet.public_eu_west_1a.id,
-    aws_subnet.public_eu_west_1b.id
-  ]
+  security_groups = [aws_security_group.sg.id]
+  subnets            = [aws_subnet.public_eu_west_1a.id, aws_subnet.public_eu_west_1b.id]
 }
 
-resource "aws_lb_listener" "http_eg1" {
-  load_balancer_arn = aws_lb.my_app_eg1.arn
+resource "aws_lb_listener" "terramino" {
+  load_balancer_arn = aws_lb.terramino.arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.my_app_eg1.arn
+    target_group_arn = aws_lb_target_group.terramino.arn
   }
+}
+
+resource "aws_lb_target_group" "terramino" {
+  name     = "learn-asg-terramino"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.app_vpc.id
+
+}
+
+
+resource "aws_autoscaling_attachment" "terramino" {
+  autoscaling_group_name = aws_autoscaling_group.terramino.id
+  lb_target_group_arn   = aws_lb_target_group.terramino.arn
 }
