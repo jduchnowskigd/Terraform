@@ -12,9 +12,6 @@ terraform {
 
   backend "s3" {
       depends_on = [aws_s3_bucket.terraform_state]
-    # bucket = aws_s3_bucket.terraform_state.name
-    # key    = "terraform.tfstate"
-    # region = "eu-west-1"  
   }
 }
 
@@ -42,7 +39,7 @@ resource "aws_instance" "template_ec2" {
 
 resource "aws_ami_from_instance" "template_ami" {
     depends_on = [ aws_instance.template_ec2 ]
-    name = "template_ami2"
+    name = "template_ami"
     source_instance_id = aws_instance.template_ec2.id
 
   tags = {
@@ -104,9 +101,7 @@ resource "aws_lb_target_group" "terramino" {
   port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.app_vpc.id
-
 }
-
 
 resource "aws_autoscaling_attachment" "terramino" {
   autoscaling_group_name = aws_autoscaling_group.terramino.id
